@@ -21,6 +21,11 @@ ATTRIB_ROW      EQU 32
 ATTRIB_LINE     EQU 24
 ATTRIB_SIZE     EQU ATTRIB_ROW*ATTRIB_LINE
 
+BORDER MACRO (COLOUR) ; copy from temp buffer to screen
+ LD A,COLOUR         ; bottom three bits of A contain the border color
+ OUT (254),A
+MEND
+
 START
  DI                      ; interrupts off
  LD SP,MEMTOP            ; set stack to end STACK?
@@ -47,40 +52,31 @@ START
  LD ($5ae0), A
  LD ($5ae1), A
 
-; LD A,3         ; bottom three bits of A contain the border color
-; OUT (254),A
-
 MAIN_LOOP
  CALL V_BLANK
 
- LD A, 3
- OUT (254),A
+ BORDER (3)
  CALL MOVE_POINTS
 
- LD A, 4
- OUT (254),A
-
+ BORDER (4)
  LD E, 180
  LD C, 72
  LD HL,testspr161600
  CALL SPRITE_PUT_1616
 
- LD A, 5
- OUT (254),A
+ BORDER (5)
+ call draw_xor
 
-   call draw_xor
+ BORDER (6)
+ call draw_put ; draw_xor
 
- LD A, 6
- OUT (254),A
-
-        call draw_put ; draw_xor
- LD A,3         ; bottom three bits of A contain the border color
- OUT (254),A
-
+ BORDER (7)
  CALL KEYBOARD
+
+ BORDER (3)
 JP MAIN_LOOP
 
-draw_xor:
+draw_xor: proc
  LD a, (sttx)
  ld c,a
  LD a, (endy)
@@ -119,9 +115,10 @@ draw_xor:
  LD HL,testspr081600
  CALL SPRITE_PUT_0816
 
-                        ret
+ ret
+ endp
 
-draw_put:
+draw_put: proc
  LD c, 10
  LD a, (endy)
  ld e,a
@@ -182,9 +179,20 @@ draw_put:
  LD HL,testsprv200
  CALL SPRITE_PUT_1624
 
-                        ret
+ LD C,160
+ LD E,160
+ LD HL,SPO12240100
+ CALL SPRITE_PUT_1224
 
-draw_clr:
+ LD C,173
+ LD E,172
+ LD HL,SPO12240100
+ CALL SPRITE_PUT_1224
+
+ ret
+ endp
+
+draw_clr: proc
  LD c, 173
  LD a, (endy)
  ld l,a
@@ -203,8 +211,8 @@ draw_clr:
  LD l, 72
  CALL SPRITE_CLR_1624
 
-                        ret
-
+  ret
+  endp
 
 ; sprite_put_0808
 ; sprite_put_0816
@@ -232,17 +240,16 @@ py defb 150
 ;        7ffe     spc sym m n b
 
 MEMSET  PROC
- ld (hl), a
- push hl
- pop de
+        ld (hl), a
+        push hl
+        pop de
 ; ld de, hl
- inc de
- ldir
+        inc de
+        ldir
         RET
         ENDP
 
 PAUSE   PROC
-
 LP      LD      A, 6
         OUT     (254),A
         LD      A, 7
@@ -251,7 +258,7 @@ LP      LD      A, 6
         RET
         ENDP
 
-KEYBOARD
+KEYBOARD PROC
  LD BC,$FBFE     ; Load BC with the row port address
  IN A,(C)        ; Read the port into the accumulator
  AND $01         ; q
@@ -285,17 +292,17 @@ Z_KEY_N
   LD (py), A
 M_KEY_N
  RET
+ ENDP
 
-V_BLANK:
- LD DE,$1140       ; attr into D, MSB of port addr into E
-FB_LP
-  INC HL          ; padding instruction
-  LD A,E          ; MSB of port addr into A
-  IN A,($ff)      ; read port 0x40FF into A
-  CP D            ; is it D (i.e. INK 1, PAPER 1, BRIGHT 0; FLASH 0)?
-  JP NZ,FB_LP     ; no? keep trying
-RET
-
+V_BLANK: PROC
+         LD DE,$1140       ; attr into D, MSB of port addr into E
+FB_LP           INC HL          ; padding instruction
+                LD A,E          ; MSB of port addr into A
+                IN A,($ff)      ; read port 0x40FF into A
+                CP D            ; is it D (i.e. INK 1, PAPER 1, BRIGHT 0; FLASH 0)?
+                JP NZ,FB_LP     ; no? keep trying
+         RET
+         ENDP
 
 CLR_LINE_EVEN_ODD MACRO ()
  LD A, (BC)         ; HI BYTE POS                #7 7
@@ -305,15 +312,6 @@ CLR_LINE_EVEN_ODD MACRO ()
  ADD A, E           ; LO BYTE POS + HOR BYTE POS #4 26
  LD L, A            ;                            #4 30
 MEND
-
-;CLR_LINE_EVEN_ODD MACRO ()
-; LD A, (BC)         ; HI BYTE POS                #7 7
-; LD H, A            ;                            #4 11
-; INC B              ;                            #4 15
-; LD A, (BC)         ; SCREEN V TABLE LO          #7 22
-; ADD A, E           ; LO BYTE POS + HOR BYTE POS #4 26
-; LD L, A            ;                            #4 30
-;MEND
 
 CLR_LONG_EVEN_ODD_24 MACRO ()
  LD     (HL), D ; START

@@ -21,6 +21,11 @@ ATTRIB_ROW      EQU 32
 ATTRIB_LINE     EQU 24
 ATTRIB_SIZE     EQU ATTRIB_ROW*ATTRIB_LINE
 
+BORDER MACRO (COLOUR) ; copy from temp buffer to screen
+ LD A,COLOUR         ; bottom three bits of A contain the border color
+ OUT (254),A
+MEND
+
 START
  DI                      ; interrupts off
  LD SP,MEMTOP            ; set stack to end STACK?
@@ -47,40 +52,41 @@ START
  LD ($5ae0), A
  LD ($5ae1), A
 
-; LD A,3         ; bottom three bits of A contain the border color
-; OUT (254),A
-
 MAIN_LOOP
  CALL V_BLANK
 
- LD A, 3
- OUT (254),A
+ BORDER (3)
  CALL MOVE_POINTS
 
- LD A, 4
- OUT (254),A
-
+ BORDER (4)
  LD E, 180
  LD C, 72
  LD HL,testspr161600
  CALL SPRITE_PUT_1616
 
- LD A, 5
- OUT (254),A
+ BORDER (5)
+ call draw_xor
 
-   call draw_xor
+ BORDER (6)
+ call draw_put ; draw_xor
 
- LD A, 6
- OUT (254),A
+ LD A,22
+ LD E,30
+ LD HL,CHAR080801
+ CALL SPRITE_PUT_BLOCK_0808
 
-        call draw_put ; draw_xor
- LD A,3         ; bottom three bits of A contain the border color
- OUT (254),A
+ LD A,18
+ LD C,28
+ LD HL,CHAR161601
+ CALL SPRITE_PUT_BLOCK_1616
 
+ BORDER (7)
  CALL KEYBOARD
+
+ BORDER (3)
 JP MAIN_LOOP
 
-draw_xor:
+draw_xor: proc
  LD a, (sttx)
  ld c,a
  LD a, (endy)
@@ -119,9 +125,10 @@ draw_xor:
  LD HL,testspr081600
  CALL SPRITE_PUT_0816
 
-                        ret
+ ret
+ endp
 
-draw_put:
+draw_put: proc
  LD c, 10
  LD a, (endy)
  ld e,a
@@ -182,9 +189,20 @@ draw_put:
  LD HL,testsprv200
  CALL SPRITE_PUT_1624
 
-                        ret
+ LD C,160
+ LD E,160
+ LD HL,SPO12240100
+ CALL SPRITE_PUT_1224
 
-draw_clr:
+ LD C,173
+ LD E,172
+ LD HL,combatspr00
+ CALL SPRITE_PUT_1224
+
+ ret
+ endp
+
+draw_clr: proc
  LD c, 173
  LD a, (endy)
  ld l,a
@@ -203,10 +221,9 @@ draw_clr:
  LD l, 72
  CALL SPRITE_CLR_1624
 
-                        ret
+  ret
+  endp
 
-
-; sprite_put_0808
 ; sprite_put_0816
 
 sttx defb 12
@@ -232,17 +249,16 @@ py defb 150
 ;        7ffe     spc sym m n b
 
 MEMSET  PROC
- ld (hl), a
- push hl
- pop de
+        ld (hl), a
+        push hl
+        pop de
 ; ld de, hl
- inc de
- ldir
+        inc de
+        ldir
         RET
         ENDP
 
 PAUSE   PROC
-
 LP      LD      A, 6
         OUT     (254),A
         LD      A, 7
@@ -251,7 +267,7 @@ LP      LD      A, 6
         RET
         ENDP
 
-KEYBOARD
+KEYBOARD PROC
  LD BC,$FBFE     ; Load BC with the row port address
  IN A,(C)        ; Read the port into the accumulator
  AND $01         ; q
@@ -285,17 +301,17 @@ Z_KEY_N
   LD (py), A
 M_KEY_N
  RET
+ ENDP
 
-V_BLANK:
- LD DE,$1140       ; attr into D, MSB of port addr into E
-FB_LP
-  INC HL          ; padding instruction
-  LD A,E          ; MSB of port addr into A
-  IN A,($ff)      ; read port 0x40FF into A
-  CP D            ; is it D (i.e. INK 1, PAPER 1, BRIGHT 0; FLASH 0)?
-  JP NZ,FB_LP     ; no? keep trying
-RET
-
+V_BLANK: PROC
+         LD DE,$1140       ; attr into D, MSB of port addr into E
+FB_LP           INC HL          ; padding instruction
+                LD A,E          ; MSB of port addr into A
+                IN A,($ff)      ; read port 0x40FF into A
+                CP D            ; is it D (i.e. INK 1, PAPER 1, BRIGHT 0; FLASH 0)?
+                JP NZ,FB_LP     ; no? keep trying
+         RET
+         ENDP
 
 CLR_LINE_EVEN_ODD MACRO ()
  LD A, (BC)         ; HI BYTE POS                #7 7
@@ -305,15 +321,6 @@ CLR_LINE_EVEN_ODD MACRO ()
  ADD A, E           ; LO BYTE POS + HOR BYTE POS #4 26
  LD L, A            ;                            #4 30
 MEND
-
-;CLR_LINE_EVEN_ODD MACRO ()
-; LD A, (BC)         ; HI BYTE POS                #7 7
-; LD H, A            ;                            #4 11
-; INC B              ;                            #4 15
-; LD A, (BC)         ; SCREEN V TABLE LO          #7 22
-; ADD A, E           ; LO BYTE POS + HOR BYTE POS #4 26
-; LD L, A            ;                            #4 30
-;MEND
 
 CLR_LONG_EVEN_ODD_24 MACRO ()
  LD     (HL), D ; START
@@ -1353,6 +1360,80 @@ STACK_ODD           LD SP, $0000
                     RET
                     ENDP
 
+SPRITE_PUT_0816_TODO     PROC    ; C=ver - E=hor - HL = sprite table ADDRESS
+                    LD D, HIGH ScrBufSprY  ; NO OF BYTES TO JUMP FORWARD to point to correct sprite definition             #4
+                    LD A, (DE)              ; GET TABLE ADDRESS OFFSET                                              #7
+
+                    ADD A, L                                ; add it to the original start position                                 #4
+                    LD L, A                                 ; and move it back to HL                                #4
+
+                    LD A, (HL)              ; SPRITE ADDRESS LO
+                    INC L
+                    LD H, (HL)              ; SPRITE ADDRESS HI
+                    LD L, A
+
+                    SRL C
+                    JP C, SPR_ODD
+
+SPR_EVEN:           LD  (STACK_EVEN+1), SP     ; store sp
+                    LD  SP, HL                          ; SP = SPRITE ADDRESS
+
+                    LD  H, HIGH ScrBufY                 ; HOR BYTES
+                    LD  L, E                            ; HOR
+                    LD  B, (HL)                         ; C=HOR BYTE POS
+
+                    SPR_LINE_EVEN () ; 0
+                    SPR_PUT_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 2
+                    SPR_PUT_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 4
+                    SPR_PUT_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 6
+                    SPR_PUT_LONG_EVEN_16 ()
+
+STACK_EVEN          LD SP, $0000
+                    RET
+
+SPR_ODD:            LD (STACK_ODD+1), SP ; store sp
+                    LD SP, HL                     ; SP = SPRITE ADDRESS
+
+                    LD H, HIGH ScrBufY            ; HOR BYTES
+                    LD L, E                        ; HOR
+                    LD B,(HL)                     ; C=HOR BYTE POS
+
+                    SPR_LINE_ODD () ; 0
+; todo                    SPR_PUT_WORD_ODD_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 1
+                    LD A,D                                                  ; backup below
+; todo                    SPR_PUT_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 3
+                    LD A,D
+; todo                    SPR_PUT_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 5
+                    LD A,D
+; todo                    SPR_PUT_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 7
+                    LD A,D
+; todo                    SPR_PUT_WORD_ODD_RIGHT_16 ()
+
+STACK_ODD           LD SP, $0000
+                    RET
+                    ENDP
+
 SPRITE_XOR_1624     PROC    ; C=ver - E=hor - HL = sprite table ADDRESS
                     LD D, HIGH ScrBufSprY  ; NO OF BYTES TO JUMP FORWARD to point to correct sprite definition             #4
                     LD A, (DE)              ; GET TABLE ADDRESS OFFSET                                              #7
@@ -1555,6 +1636,80 @@ STACK_ODD           LD SP, $0000
                     RET
                     ENDP
 
+SPRITE_XOR_0816_TODO     PROC    ; C=ver - E=hor - HL = sprite table ADDRESS
+                    LD D, HIGH ScrBufSprY  ; NO OF BYTES TO JUMP FORWARD to point to correct sprite definition             #4
+                    LD A, (DE)              ; GET TABLE ADDRESS OFFSET                                              #7
+
+                    ADD A, L                                ; add it to the original start position                                 #4
+                    LD L, A                                 ; and move it back to HL                                #4
+
+                    LD A, (HL)              ; SPRITE ADDRESS LO
+                    INC L
+                    LD H, (HL)              ; SPRITE ADDRESS HI
+                    LD L, A
+
+                    SRL C
+                    JP C, SPR_ODD
+
+SPR_EVEN:           LD  (STACK_EVEN+1), SP     ; store sp
+                    LD  SP, HL                          ; SP = SPRITE ADDRESS
+
+                    LD  H, HIGH ScrBufY                 ; HOR BYTES
+                    LD  L, E                            ; HOR
+                    LD  B, (HL)                         ; C=HOR BYTE POS
+
+                    SPR_LINE_EVEN () ; 0
+; todo                    SPR_XOR_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 2
+; todo                    SPR_XOR_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 4
+; todo                    SPR_XOR_LONG_EVEN_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 6
+; todo                    SPR_XOR_LONG_EVEN_16 ()
+
+STACK_EVEN          LD SP, $0000
+                    RET
+
+SPR_ODD:            LD (STACK_ODD+1), SP ; store sp
+                    LD SP, HL                     ; SP = SPRITE ADDRESS
+
+                    LD H, HIGH ScrBufY            ; HOR BYTES
+                    LD L, E                        ; HOR
+                    LD B,(HL)                     ; C=HOR BYTE POS
+
+                    SPR_LINE_ODD () ; 0
+; todo                    SPR_XOR_WORD_ODD_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 1
+                    LD A,D                                                  ; backup below
+; todo                    SPR_XOR_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 3
+                    LD A,D
+; todo                    SPR_XOR_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 5
+                    LD A,D
+; todo                    SPR_XOR_LONG_ODD_RIGHT_16 ()
+                    INC C
+
+                    SPR_LINE_EVEN () ; 7
+                    LD A,D
+; todo                     SPR_XOR_WORD_ODD_RIGHT_16 ()
+
+STACK_ODD           LD SP, $0000
+                    RET
+                    ENDP
+
 SPRITE_CLR_1624     PROC   ; l=hor / c=ver
                 LD  H, HIGH ScrBufY                 ; HOR BYTES
                 LD  E, (HL)                         ; L=HOR BYTE POS
@@ -1650,6 +1805,227 @@ SPR_ODD:        LD B, HIGH ScrBufOddH
                 RET
                 ENDP
 
+SPRITE_CLR_1224     PROC   ; l=hor / c=ver
+                LD  H, HIGH ScrBufY                 ; HOR BYTES
+                LD  E, (HL)                         ; L=HOR BYTE POS
+
+                LD  D,0
+
+                SRL C
+                JP  C, SPR_ODD
+
+SPR_EVEN:       LD B, HIGH ScrBufEvenH
+                CLR_LINE_EVEN_ODD () ; 0
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 2
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 4
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 6
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 8
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 10
+                CLR_LONG_EVEN_ODD_24 ()
+                RET
+
+SPR_ODD:        LD B, HIGH ScrBufOddH
+                CLR_LINE_EVEN_ODD () ; 0
+                CLR_WORD_EVEN_ODD_24 ()
+                INC C
+
+                LD B, HIGH ScrBufEvenH
+                CLR_LINE_EVEN_ODD () ; 1
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 3
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 5
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 7
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 9
+                DEC B
+                CLR_LONG_EVEN_ODD_24 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 11
+                CLR_WORD_EVEN_ODD_24 ()
+                RET
+                ENDP
+
+SPRITE_CLR_0816_TODO     PROC   ; l=hor / c=ver
+                LD  H, HIGH ScrBufY                 ; HOR BYTES
+                LD  E, (HL)                         ; L=HOR BYTE POS
+
+                LD  D,0
+
+                SRL C
+                JP  C, SPR_ODD
+
+SPR_EVEN:       LD B, HIGH ScrBufEvenH
+                CLR_LINE_EVEN_ODD () ; 0
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 2
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 4
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 6
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+                RET
+
+SPR_ODD:        LD B, HIGH ScrBufOddH
+                CLR_LINE_EVEN_ODD () ; 0
+; todo                CLR_WORD_EVEN_ODD_16 ()
+                INC C
+
+                LD B, HIGH ScrBufEvenH
+                CLR_LINE_EVEN_ODD () ; 1
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 3
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 5
+                DEC B
+; todo                CLR_LONG_EVEN_ODD_16 ()
+                INC C
+
+                CLR_LINE_EVEN_ODD () ; 7
+; todo                CLR_WORD_EVEN_ODD_16 ()
+                RET
+                ENDP
+
+SPRITE_BLOCK_0802 MACRO ()
+        POP DE
+        LD (HL), E
+        INC H
+        LD (HL), D
+ENDM
+
+SPRITE_PUT_BLOCK_0808   PROC ; A=VER CHAR E=HOR CHAR ; HL=BLOCK ADDRESS
+                                                LD (STACK_0808+1), SP
+                                                LD SP, HL
+
+ ADD A, A
+ ADD A, A
+ LD L, A
+ LD A, E
+ LD H, HIGH ScrBufEvenL
+ ADD A, (HL)
+ DEC H
+ LD H, (HL)
+ LD L, A
+
+                                                SPRITE_BLOCK_0802 ()
+                                                INC H
+                                                SPRITE_BLOCK_0802 ()
+                                                INC H
+                                                SPRITE_BLOCK_0802 ()
+                                                INC H
+                                                SPRITE_BLOCK_0802 ()
+STACK_0808              LD SP, $0000
+                                                RET
+                                                ENDP
+
+SPRITE_BLOCK_1602 MACRO ()
+        POP DE
+        LD (HL), E
+        INC L
+        LD (HL), D
+                INC H
+        POP DE
+        LD (HL), D
+        DEC L
+        LD (HL), E
+ENDM
+
+SPRITE_PUT_BLOCK_1616   PROC
+                                                LD (STACK_1616+1), SP
+                        LD SP, HL
+
+ ADD A, A
+ ADD A, A
+ LD L, A
+ EX AF,AF'
+
+ LD A, C
+ LD H, HIGH ScrBufEvenL
+ ADD A, (HL)
+ DEC H
+ LD H, (HL)
+ LD L, A
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+
+ EX AF,AF'
+ ADD A, 4
+ LD L, A
+
+ LD A, C
+ LD H, HIGH ScrBufEvenL
+ ADD A, (HL)
+ DEC H
+ LD H, (HL)
+ LD L, A
+
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+                                                INC H
+                                                SPRITE_BLOCK_1602 ()
+STACK_1616              LD SP, $0000
+
+                                                RET
+                                                ENDP
 
 MOVE_POINT          PROC
  LD a, (sttx)
@@ -1791,120 +2167,9 @@ testspr161600   defw testspr161601,testspr161601,testspr161601,testspr161601,tes
 
 testspr081600   defw testspr081601,testspr081601,testspr081601,testspr081601,testspr081601,testspr081601,testspr081601,testspr081601
 
-ALIGN $100
-
-ScrBufEvenH
- DEFB (SCREEN+(0*2048)+(0*256)+(0*32))/256,(SCREEN+(0*2048)+(2*256)+(0*32))/256,(SCREEN+(0*2048)+(4*256)+(0*32))/256,(SCREEN+(0*2048)+(6*256)+(0*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(1*32))/256,(SCREEN+(0*2048)+(2*256)+(1*32))/256,(SCREEN+(0*2048)+(4*256)+(1*32))/256,(SCREEN+(0*2048)+(6*256)+(1*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(2*32))/256,(SCREEN+(0*2048)+(2*256)+(2*32))/256,(SCREEN+(0*2048)+(4*256)+(2*32))/256,(SCREEN+(0*2048)+(6*256)+(2*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(3*32))/256,(SCREEN+(0*2048)+(2*256)+(3*32))/256,(SCREEN+(0*2048)+(4*256)+(3*32))/256,(SCREEN+(0*2048)+(6*256)+(3*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(4*32))/256,(SCREEN+(0*2048)+(2*256)+(4*32))/256,(SCREEN+(0*2048)+(4*256)+(4*32))/256,(SCREEN+(0*2048)+(6*256)+(4*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(5*32))/256,(SCREEN+(0*2048)+(2*256)+(5*32))/256,(SCREEN+(0*2048)+(4*256)+(5*32))/256,(SCREEN+(0*2048)+(6*256)+(5*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(6*32))/256,(SCREEN+(0*2048)+(2*256)+(6*32))/256,(SCREEN+(0*2048)+(4*256)+(6*32))/256,(SCREEN+(0*2048)+(6*256)+(6*32))/256
- DEFB (SCREEN+(0*2048)+(0*256)+(7*32))/256,(SCREEN+(0*2048)+(2*256)+(7*32))/256,(SCREEN+(0*2048)+(4*256)+(7*32))/256,(SCREEN+(0*2048)+(6*256)+(7*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(0*32))/256,(SCREEN+(1*2048)+(2*256)+(0*32))/256,(SCREEN+(1*2048)+(4*256)+(0*32))/256,(SCREEN+(1*2048)+(6*256)+(0*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(1*32))/256,(SCREEN+(1*2048)+(2*256)+(1*32))/256,(SCREEN+(1*2048)+(4*256)+(1*32))/256,(SCREEN+(1*2048)+(6*256)+(1*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(2*32))/256,(SCREEN+(1*2048)+(2*256)+(2*32))/256,(SCREEN+(1*2048)+(4*256)+(2*32))/256,(SCREEN+(1*2048)+(6*256)+(2*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(3*32))/256,(SCREEN+(1*2048)+(2*256)+(3*32))/256,(SCREEN+(1*2048)+(4*256)+(3*32))/256,(SCREEN+(1*2048)+(6*256)+(3*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(4*32))/256,(SCREEN+(1*2048)+(2*256)+(4*32))/256,(SCREEN+(1*2048)+(4*256)+(4*32))/256,(SCREEN+(1*2048)+(6*256)+(4*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(5*32))/256,(SCREEN+(1*2048)+(2*256)+(5*32))/256,(SCREEN+(1*2048)+(4*256)+(5*32))/256,(SCREEN+(1*2048)+(6*256)+(5*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(6*32))/256,(SCREEN+(1*2048)+(2*256)+(6*32))/256,(SCREEN+(1*2048)+(4*256)+(6*32))/256,(SCREEN+(1*2048)+(6*256)+(6*32))/256
- DEFB (SCREEN+(1*2048)+(0*256)+(7*32))/256,(SCREEN+(1*2048)+(2*256)+(7*32))/256,(SCREEN+(1*2048)+(4*256)+(7*32))/256,(SCREEN+(1*2048)+(6*256)+(7*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(0*32))/256,(SCREEN+(2*2048)+(2*256)+(0*32))/256,(SCREEN+(2*2048)+(4*256)+(0*32))/256,(SCREEN+(2*2048)+(6*256)+(0*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(1*32))/256,(SCREEN+(2*2048)+(2*256)+(1*32))/256,(SCREEN+(2*2048)+(4*256)+(1*32))/256,(SCREEN+(2*2048)+(6*256)+(1*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(2*32))/256,(SCREEN+(2*2048)+(2*256)+(2*32))/256,(SCREEN+(2*2048)+(4*256)+(2*32))/256,(SCREEN+(2*2048)+(6*256)+(2*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(3*32))/256,(SCREEN+(2*2048)+(2*256)+(3*32))/256,(SCREEN+(2*2048)+(4*256)+(3*32))/256,(SCREEN+(2*2048)+(6*256)+(3*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(4*32))/256,(SCREEN+(2*2048)+(2*256)+(4*32))/256,(SCREEN+(2*2048)+(4*256)+(4*32))/256,(SCREEN+(2*2048)+(6*256)+(4*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(5*32))/256,(SCREEN+(2*2048)+(2*256)+(5*32))/256,(SCREEN+(2*2048)+(4*256)+(5*32))/256,(SCREEN+(2*2048)+(6*256)+(5*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(6*32))/256,(SCREEN+(2*2048)+(2*256)+(6*32))/256,(SCREEN+(2*2048)+(4*256)+(6*32))/256,(SCREEN+(2*2048)+(6*256)+(6*32))/256
- DEFB (SCREEN+(2*2048)+(0*256)+(7*32))/256,(SCREEN+(2*2048)+(2*256)+(7*32))/256,(SCREEN+(2*2048)+(4*256)+(7*32))/256,(SCREEN+(2*2048)+(6*256)+(7*32))/256
+combatspr00 defw combatspr01,combatspr02,combatspr03,combatspr04,combatspr05,combatspr06,combatspr07,combatspr08
 
 ALIGN $100
-
-ScrBufEvenL
- DEFB (SCREEN+(0*2048)+(0*256)+(0*32))&255,(SCREEN+(0*2048)+(2*256)+(0*32))&255,(SCREEN+(0*2048)+(4*256)+(0*32))&255,(SCREEN+(0*2048)+(6*256)+(0*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(1*32))&255,(SCREEN+(0*2048)+(2*256)+(1*32))&255,(SCREEN+(0*2048)+(4*256)+(1*32))&255,(SCREEN+(0*2048)+(6*256)+(1*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(2*32))&255,(SCREEN+(0*2048)+(2*256)+(2*32))&255,(SCREEN+(0*2048)+(4*256)+(2*32))&255,(SCREEN+(0*2048)+(6*256)+(2*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(3*32))&255,(SCREEN+(0*2048)+(2*256)+(3*32))&255,(SCREEN+(0*2048)+(4*256)+(3*32))&255,(SCREEN+(0*2048)+(6*256)+(3*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(4*32))&255,(SCREEN+(0*2048)+(2*256)+(4*32))&255,(SCREEN+(0*2048)+(4*256)+(4*32))&255,(SCREEN+(0*2048)+(6*256)+(4*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(5*32))&255,(SCREEN+(0*2048)+(2*256)+(5*32))&255,(SCREEN+(0*2048)+(4*256)+(5*32))&255,(SCREEN+(0*2048)+(6*256)+(5*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(6*32))&255,(SCREEN+(0*2048)+(2*256)+(6*32))&255,(SCREEN+(0*2048)+(4*256)+(6*32))&255,(SCREEN+(0*2048)+(6*256)+(6*32))&255
- DEFB (SCREEN+(0*2048)+(0*256)+(7*32))&255,(SCREEN+(0*2048)+(2*256)+(7*32))&255,(SCREEN+(0*2048)+(4*256)+(7*32))&255,(SCREEN+(0*2048)+(6*256)+(7*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(0*32))&255,(SCREEN+(1*2048)+(2*256)+(0*32))&255,(SCREEN+(1*2048)+(4*256)+(0*32))&255,(SCREEN+(1*2048)+(6*256)+(0*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(1*32))&255,(SCREEN+(1*2048)+(2*256)+(1*32))&255,(SCREEN+(1*2048)+(4*256)+(1*32))&255,(SCREEN+(1*2048)+(6*256)+(1*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(2*32))&255,(SCREEN+(1*2048)+(2*256)+(2*32))&255,(SCREEN+(1*2048)+(4*256)+(2*32))&255,(SCREEN+(1*2048)+(6*256)+(2*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(3*32))&255,(SCREEN+(1*2048)+(2*256)+(3*32))&255,(SCREEN+(1*2048)+(4*256)+(3*32))&255,(SCREEN+(1*2048)+(6*256)+(3*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(4*32))&255,(SCREEN+(1*2048)+(2*256)+(4*32))&255,(SCREEN+(1*2048)+(4*256)+(4*32))&255,(SCREEN+(1*2048)+(6*256)+(4*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(5*32))&255,(SCREEN+(1*2048)+(2*256)+(5*32))&255,(SCREEN+(1*2048)+(4*256)+(5*32))&255,(SCREEN+(1*2048)+(6*256)+(5*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(6*32))&255,(SCREEN+(1*2048)+(2*256)+(6*32))&255,(SCREEN+(1*2048)+(4*256)+(6*32))&255,(SCREEN+(1*2048)+(6*256)+(6*32))&255
- DEFB (SCREEN+(1*2048)+(0*256)+(7*32))&255,(SCREEN+(1*2048)+(2*256)+(7*32))&255,(SCREEN+(1*2048)+(4*256)+(7*32))&255,(SCREEN+(1*2048)+(6*256)+(7*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(0*32))&255,(SCREEN+(2*2048)+(2*256)+(0*32))&255,(SCREEN+(2*2048)+(4*256)+(0*32))&255,(SCREEN+(2*2048)+(6*256)+(0*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(1*32))&255,(SCREEN+(2*2048)+(2*256)+(1*32))&255,(SCREEN+(2*2048)+(4*256)+(1*32))&255,(SCREEN+(2*2048)+(6*256)+(1*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(2*32))&255,(SCREEN+(2*2048)+(2*256)+(2*32))&255,(SCREEN+(2*2048)+(4*256)+(2*32))&255,(SCREEN+(2*2048)+(6*256)+(2*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(3*32))&255,(SCREEN+(2*2048)+(2*256)+(3*32))&255,(SCREEN+(2*2048)+(4*256)+(3*32))&255,(SCREEN+(2*2048)+(6*256)+(3*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(4*32))&255,(SCREEN+(2*2048)+(2*256)+(4*32))&255,(SCREEN+(2*2048)+(4*256)+(4*32))&255,(SCREEN+(2*2048)+(6*256)+(4*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(5*32))&255,(SCREEN+(2*2048)+(2*256)+(5*32))&255,(SCREEN+(2*2048)+(4*256)+(5*32))&255,(SCREEN+(2*2048)+(6*256)+(5*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(6*32))&255,(SCREEN+(2*2048)+(2*256)+(6*32))&255,(SCREEN+(2*2048)+(4*256)+(6*32))&255,(SCREEN+(2*2048)+(6*256)+(6*32))&255
- DEFB (SCREEN+(2*2048)+(0*256)+(7*32))&255,(SCREEN+(2*2048)+(2*256)+(7*32))&255,(SCREEN+(2*2048)+(4*256)+(7*32))&255,(SCREEN+(2*2048)+(6*256)+(7*32))&255
-
-ALIGN $100
-
-ScrBufOddH
- DEFB (SCREEN+(0*2048)+(1*256)+(0*32))/256,(SCREEN+(0*2048)+(3*256)+(0*32))/256,(SCREEN+(0*2048)+(5*256)+(0*32))/256,(SCREEN+(0*2048)+(7*256)+(0*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(1*32))/256,(SCREEN+(0*2048)+(3*256)+(1*32))/256,(SCREEN+(0*2048)+(5*256)+(1*32))/256,(SCREEN+(0*2048)+(7*256)+(1*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(2*32))/256,(SCREEN+(0*2048)+(3*256)+(2*32))/256,(SCREEN+(0*2048)+(5*256)+(2*32))/256,(SCREEN+(0*2048)+(7*256)+(2*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(3*32))/256,(SCREEN+(0*2048)+(3*256)+(3*32))/256,(SCREEN+(0*2048)+(5*256)+(3*32))/256,(SCREEN+(0*2048)+(7*256)+(3*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(4*32))/256,(SCREEN+(0*2048)+(3*256)+(4*32))/256,(SCREEN+(0*2048)+(5*256)+(4*32))/256,(SCREEN+(0*2048)+(7*256)+(4*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(5*32))/256,(SCREEN+(0*2048)+(3*256)+(5*32))/256,(SCREEN+(0*2048)+(5*256)+(5*32))/256,(SCREEN+(0*2048)+(7*256)+(5*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(6*32))/256,(SCREEN+(0*2048)+(3*256)+(6*32))/256,(SCREEN+(0*2048)+(5*256)+(6*32))/256,(SCREEN+(0*2048)+(7*256)+(6*32))/256
- DEFB (SCREEN+(0*2048)+(1*256)+(7*32))/256,(SCREEN+(0*2048)+(3*256)+(7*32))/256,(SCREEN+(0*2048)+(5*256)+(7*32))/256,(SCREEN+(0*2048)+(7*256)+(7*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(0*32))/256,(SCREEN+(1*2048)+(3*256)+(0*32))/256,(SCREEN+(1*2048)+(5*256)+(0*32))/256,(SCREEN+(1*2048)+(7*256)+(0*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(1*32))/256,(SCREEN+(1*2048)+(3*256)+(1*32))/256,(SCREEN+(1*2048)+(5*256)+(1*32))/256,(SCREEN+(1*2048)+(7*256)+(1*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(2*32))/256,(SCREEN+(1*2048)+(3*256)+(2*32))/256,(SCREEN+(1*2048)+(5*256)+(2*32))/256,(SCREEN+(1*2048)+(7*256)+(2*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(3*32))/256,(SCREEN+(1*2048)+(3*256)+(3*32))/256,(SCREEN+(1*2048)+(5*256)+(3*32))/256,(SCREEN+(1*2048)+(7*256)+(3*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(4*32))/256,(SCREEN+(1*2048)+(3*256)+(4*32))/256,(SCREEN+(1*2048)+(5*256)+(4*32))/256,(SCREEN+(1*2048)+(7*256)+(4*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(5*32))/256,(SCREEN+(1*2048)+(3*256)+(5*32))/256,(SCREEN+(1*2048)+(5*256)+(5*32))/256,(SCREEN+(1*2048)+(7*256)+(5*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(6*32))/256,(SCREEN+(1*2048)+(3*256)+(6*32))/256,(SCREEN+(1*2048)+(5*256)+(6*32))/256,(SCREEN+(1*2048)+(7*256)+(6*32))/256
- DEFB (SCREEN+(1*2048)+(1*256)+(7*32))/256,(SCREEN+(1*2048)+(3*256)+(7*32))/256,(SCREEN+(1*2048)+(5*256)+(7*32))/256,(SCREEN+(1*2048)+(7*256)+(7*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(0*32))/256,(SCREEN+(2*2048)+(3*256)+(0*32))/256,(SCREEN+(2*2048)+(5*256)+(0*32))/256,(SCREEN+(2*2048)+(7*256)+(0*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(1*32))/256,(SCREEN+(2*2048)+(3*256)+(1*32))/256,(SCREEN+(2*2048)+(5*256)+(1*32))/256,(SCREEN+(2*2048)+(7*256)+(1*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(2*32))/256,(SCREEN+(2*2048)+(3*256)+(2*32))/256,(SCREEN+(2*2048)+(5*256)+(2*32))/256,(SCREEN+(2*2048)+(7*256)+(2*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(3*32))/256,(SCREEN+(2*2048)+(3*256)+(3*32))/256,(SCREEN+(2*2048)+(5*256)+(3*32))/256,(SCREEN+(2*2048)+(7*256)+(3*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(4*32))/256,(SCREEN+(2*2048)+(3*256)+(4*32))/256,(SCREEN+(2*2048)+(5*256)+(4*32))/256,(SCREEN+(2*2048)+(7*256)+(4*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(5*32))/256,(SCREEN+(2*2048)+(3*256)+(5*32))/256,(SCREEN+(2*2048)+(5*256)+(5*32))/256,(SCREEN+(2*2048)+(7*256)+(5*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(6*32))/256,(SCREEN+(2*2048)+(3*256)+(6*32))/256,(SCREEN+(2*2048)+(5*256)+(6*32))/256,(SCREEN+(2*2048)+(7*256)+(6*32))/256
- DEFB (SCREEN+(2*2048)+(1*256)+(7*32))/256,(SCREEN+(2*2048)+(3*256)+(7*32))/256,(SCREEN+(2*2048)+(5*256)+(7*32))/256,(SCREEN+(2*2048)+(7*256)+(7*32))/256
-
-ALIGN $100
-
-ScrBufOddL
- DEFB (SCREEN+(0*2048)+(1*256)+(0*32))&255,(SCREEN+(0*2048)+(3*256)+(0*32))&255,(SCREEN+(0*2048)+(5*256)+(0*32))&255,(SCREEN+(0*2048)+(7*256)+(0*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(1*32))&255,(SCREEN+(0*2048)+(3*256)+(1*32))&255,(SCREEN+(0*2048)+(5*256)+(1*32))&255,(SCREEN+(0*2048)+(7*256)+(1*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(2*32))&255,(SCREEN+(0*2048)+(3*256)+(2*32))&255,(SCREEN+(0*2048)+(5*256)+(2*32))&255,(SCREEN+(0*2048)+(7*256)+(2*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(3*32))&255,(SCREEN+(0*2048)+(3*256)+(3*32))&255,(SCREEN+(0*2048)+(5*256)+(3*32))&255,(SCREEN+(0*2048)+(7*256)+(3*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(4*32))&255,(SCREEN+(0*2048)+(3*256)+(4*32))&255,(SCREEN+(0*2048)+(5*256)+(4*32))&255,(SCREEN+(0*2048)+(7*256)+(4*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(5*32))&255,(SCREEN+(0*2048)+(3*256)+(5*32))&255,(SCREEN+(0*2048)+(5*256)+(5*32))&255,(SCREEN+(0*2048)+(7*256)+(5*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(6*32))&255,(SCREEN+(0*2048)+(3*256)+(6*32))&255,(SCREEN+(0*2048)+(5*256)+(6*32))&255,(SCREEN+(0*2048)+(7*256)+(6*32))&255
- DEFB (SCREEN+(0*2048)+(1*256)+(7*32))&255,(SCREEN+(0*2048)+(3*256)+(7*32))&255,(SCREEN+(0*2048)+(5*256)+(7*32))&255,(SCREEN+(0*2048)+(7*256)+(7*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(0*32))&255,(SCREEN+(1*2048)+(3*256)+(0*32))&255,(SCREEN+(1*2048)+(5*256)+(0*32))&255,(SCREEN+(1*2048)+(7*256)+(0*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(1*32))&255,(SCREEN+(1*2048)+(3*256)+(1*32))&255,(SCREEN+(1*2048)+(5*256)+(1*32))&255,(SCREEN+(1*2048)+(7*256)+(1*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(2*32))&255,(SCREEN+(1*2048)+(3*256)+(2*32))&255,(SCREEN+(1*2048)+(5*256)+(2*32))&255,(SCREEN+(1*2048)+(7*256)+(2*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(3*32))&255,(SCREEN+(1*2048)+(3*256)+(3*32))&255,(SCREEN+(1*2048)+(5*256)+(3*32))&255,(SCREEN+(1*2048)+(7*256)+(3*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(4*32))&255,(SCREEN+(1*2048)+(3*256)+(4*32))&255,(SCREEN+(1*2048)+(5*256)+(4*32))&255,(SCREEN+(1*2048)+(7*256)+(4*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(5*32))&255,(SCREEN+(1*2048)+(3*256)+(5*32))&255,(SCREEN+(1*2048)+(5*256)+(5*32))&255,(SCREEN+(1*2048)+(7*256)+(5*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(6*32))&255,(SCREEN+(1*2048)+(3*256)+(6*32))&255,(SCREEN+(1*2048)+(5*256)+(6*32))&255,(SCREEN+(1*2048)+(7*256)+(6*32))&255
- DEFB (SCREEN+(1*2048)+(1*256)+(7*32))&255,(SCREEN+(1*2048)+(3*256)+(7*32))&255,(SCREEN+(1*2048)+(5*256)+(7*32))&255,(SCREEN+(1*2048)+(7*256)+(7*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(0*32))&255,(SCREEN+(2*2048)+(3*256)+(0*32))&255,(SCREEN+(2*2048)+(5*256)+(0*32))&255,(SCREEN+(2*2048)+(7*256)+(0*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(1*32))&255,(SCREEN+(2*2048)+(3*256)+(1*32))&255,(SCREEN+(2*2048)+(5*256)+(1*32))&255,(SCREEN+(2*2048)+(7*256)+(1*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(2*32))&255,(SCREEN+(2*2048)+(3*256)+(2*32))&255,(SCREEN+(2*2048)+(5*256)+(2*32))&255,(SCREEN+(2*2048)+(7*256)+(2*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(3*32))&255,(SCREEN+(2*2048)+(3*256)+(3*32))&255,(SCREEN+(2*2048)+(5*256)+(3*32))&255,(SCREEN+(2*2048)+(7*256)+(3*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(4*32))&255,(SCREEN+(2*2048)+(3*256)+(4*32))&255,(SCREEN+(2*2048)+(5*256)+(4*32))&255,(SCREEN+(2*2048)+(7*256)+(4*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(5*32))&255,(SCREEN+(2*2048)+(3*256)+(5*32))&255,(SCREEN+(2*2048)+(5*256)+(5*32))&255,(SCREEN+(2*2048)+(7*256)+(5*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(6*32))&255,(SCREEN+(2*2048)+(3*256)+(6*32))&255,(SCREEN+(2*2048)+(5*256)+(6*32))&255,(SCREEN+(2*2048)+(7*256)+(6*32))&255
- DEFB (SCREEN+(2*2048)+(1*256)+(7*32))&255,(SCREEN+(2*2048)+(3*256)+(7*32))&255,(SCREEN+(2*2048)+(5*256)+(7*32))&255,(SCREEN+(2*2048)+(7*256)+(7*32))&255
-
-ALIGN $100
-
 ScrBufY
  DEFS 8,0
  DEFS 8,1
@@ -1940,7 +2205,114 @@ ScrBufY
  DEFS 8,31
 
 ALIGN $100
+ScrBufEvenH
+ DEFB (SCREEN+(0*2048)+(0*256)+(0*32))/256,(SCREEN+(0*2048)+(2*256)+(0*32))/256,(SCREEN+(0*2048)+(4*256)+(0*32))/256,(SCREEN+(0*2048)+(6*256)+(0*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(1*32))/256,(SCREEN+(0*2048)+(2*256)+(1*32))/256,(SCREEN+(0*2048)+(4*256)+(1*32))/256,(SCREEN+(0*2048)+(6*256)+(1*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(2*32))/256,(SCREEN+(0*2048)+(2*256)+(2*32))/256,(SCREEN+(0*2048)+(4*256)+(2*32))/256,(SCREEN+(0*2048)+(6*256)+(2*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(3*32))/256,(SCREEN+(0*2048)+(2*256)+(3*32))/256,(SCREEN+(0*2048)+(4*256)+(3*32))/256,(SCREEN+(0*2048)+(6*256)+(3*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(4*32))/256,(SCREEN+(0*2048)+(2*256)+(4*32))/256,(SCREEN+(0*2048)+(4*256)+(4*32))/256,(SCREEN+(0*2048)+(6*256)+(4*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(5*32))/256,(SCREEN+(0*2048)+(2*256)+(5*32))/256,(SCREEN+(0*2048)+(4*256)+(5*32))/256,(SCREEN+(0*2048)+(6*256)+(5*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(6*32))/256,(SCREEN+(0*2048)+(2*256)+(6*32))/256,(SCREEN+(0*2048)+(4*256)+(6*32))/256,(SCREEN+(0*2048)+(6*256)+(6*32))/256
+ DEFB (SCREEN+(0*2048)+(0*256)+(7*32))/256,(SCREEN+(0*2048)+(2*256)+(7*32))/256,(SCREEN+(0*2048)+(4*256)+(7*32))/256,(SCREEN+(0*2048)+(6*256)+(7*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(0*32))/256,(SCREEN+(1*2048)+(2*256)+(0*32))/256,(SCREEN+(1*2048)+(4*256)+(0*32))/256,(SCREEN+(1*2048)+(6*256)+(0*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(1*32))/256,(SCREEN+(1*2048)+(2*256)+(1*32))/256,(SCREEN+(1*2048)+(4*256)+(1*32))/256,(SCREEN+(1*2048)+(6*256)+(1*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(2*32))/256,(SCREEN+(1*2048)+(2*256)+(2*32))/256,(SCREEN+(1*2048)+(4*256)+(2*32))/256,(SCREEN+(1*2048)+(6*256)+(2*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(3*32))/256,(SCREEN+(1*2048)+(2*256)+(3*32))/256,(SCREEN+(1*2048)+(4*256)+(3*32))/256,(SCREEN+(1*2048)+(6*256)+(3*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(4*32))/256,(SCREEN+(1*2048)+(2*256)+(4*32))/256,(SCREEN+(1*2048)+(4*256)+(4*32))/256,(SCREEN+(1*2048)+(6*256)+(4*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(5*32))/256,(SCREEN+(1*2048)+(2*256)+(5*32))/256,(SCREEN+(1*2048)+(4*256)+(5*32))/256,(SCREEN+(1*2048)+(6*256)+(5*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(6*32))/256,(SCREEN+(1*2048)+(2*256)+(6*32))/256,(SCREEN+(1*2048)+(4*256)+(6*32))/256,(SCREEN+(1*2048)+(6*256)+(6*32))/256
+ DEFB (SCREEN+(1*2048)+(0*256)+(7*32))/256,(SCREEN+(1*2048)+(2*256)+(7*32))/256,(SCREEN+(1*2048)+(4*256)+(7*32))/256,(SCREEN+(1*2048)+(6*256)+(7*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(0*32))/256,(SCREEN+(2*2048)+(2*256)+(0*32))/256,(SCREEN+(2*2048)+(4*256)+(0*32))/256,(SCREEN+(2*2048)+(6*256)+(0*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(1*32))/256,(SCREEN+(2*2048)+(2*256)+(1*32))/256,(SCREEN+(2*2048)+(4*256)+(1*32))/256,(SCREEN+(2*2048)+(6*256)+(1*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(2*32))/256,(SCREEN+(2*2048)+(2*256)+(2*32))/256,(SCREEN+(2*2048)+(4*256)+(2*32))/256,(SCREEN+(2*2048)+(6*256)+(2*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(3*32))/256,(SCREEN+(2*2048)+(2*256)+(3*32))/256,(SCREEN+(2*2048)+(4*256)+(3*32))/256,(SCREEN+(2*2048)+(6*256)+(3*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(4*32))/256,(SCREEN+(2*2048)+(2*256)+(4*32))/256,(SCREEN+(2*2048)+(4*256)+(4*32))/256,(SCREEN+(2*2048)+(6*256)+(4*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(5*32))/256,(SCREEN+(2*2048)+(2*256)+(5*32))/256,(SCREEN+(2*2048)+(4*256)+(5*32))/256,(SCREEN+(2*2048)+(6*256)+(5*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(6*32))/256,(SCREEN+(2*2048)+(2*256)+(6*32))/256,(SCREEN+(2*2048)+(4*256)+(6*32))/256,(SCREEN+(2*2048)+(6*256)+(6*32))/256
+ DEFB (SCREEN+(2*2048)+(0*256)+(7*32))/256,(SCREEN+(2*2048)+(2*256)+(7*32))/256,(SCREEN+(2*2048)+(4*256)+(7*32))/256,(SCREEN+(2*2048)+(6*256)+(7*32))/256
 
+ALIGN $100
+ScrBufEvenL
+ DEFB (SCREEN+(0*2048)+(0*256)+(0*32))&255,(SCREEN+(0*2048)+(2*256)+(0*32))&255,(SCREEN+(0*2048)+(4*256)+(0*32))&255,(SCREEN+(0*2048)+(6*256)+(0*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(1*32))&255,(SCREEN+(0*2048)+(2*256)+(1*32))&255,(SCREEN+(0*2048)+(4*256)+(1*32))&255,(SCREEN+(0*2048)+(6*256)+(1*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(2*32))&255,(SCREEN+(0*2048)+(2*256)+(2*32))&255,(SCREEN+(0*2048)+(4*256)+(2*32))&255,(SCREEN+(0*2048)+(6*256)+(2*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(3*32))&255,(SCREEN+(0*2048)+(2*256)+(3*32))&255,(SCREEN+(0*2048)+(4*256)+(3*32))&255,(SCREEN+(0*2048)+(6*256)+(3*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(4*32))&255,(SCREEN+(0*2048)+(2*256)+(4*32))&255,(SCREEN+(0*2048)+(4*256)+(4*32))&255,(SCREEN+(0*2048)+(6*256)+(4*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(5*32))&255,(SCREEN+(0*2048)+(2*256)+(5*32))&255,(SCREEN+(0*2048)+(4*256)+(5*32))&255,(SCREEN+(0*2048)+(6*256)+(5*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(6*32))&255,(SCREEN+(0*2048)+(2*256)+(6*32))&255,(SCREEN+(0*2048)+(4*256)+(6*32))&255,(SCREEN+(0*2048)+(6*256)+(6*32))&255
+ DEFB (SCREEN+(0*2048)+(0*256)+(7*32))&255,(SCREEN+(0*2048)+(2*256)+(7*32))&255,(SCREEN+(0*2048)+(4*256)+(7*32))&255,(SCREEN+(0*2048)+(6*256)+(7*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(0*32))&255,(SCREEN+(1*2048)+(2*256)+(0*32))&255,(SCREEN+(1*2048)+(4*256)+(0*32))&255,(SCREEN+(1*2048)+(6*256)+(0*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(1*32))&255,(SCREEN+(1*2048)+(2*256)+(1*32))&255,(SCREEN+(1*2048)+(4*256)+(1*32))&255,(SCREEN+(1*2048)+(6*256)+(1*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(2*32))&255,(SCREEN+(1*2048)+(2*256)+(2*32))&255,(SCREEN+(1*2048)+(4*256)+(2*32))&255,(SCREEN+(1*2048)+(6*256)+(2*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(3*32))&255,(SCREEN+(1*2048)+(2*256)+(3*32))&255,(SCREEN+(1*2048)+(4*256)+(3*32))&255,(SCREEN+(1*2048)+(6*256)+(3*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(4*32))&255,(SCREEN+(1*2048)+(2*256)+(4*32))&255,(SCREEN+(1*2048)+(4*256)+(4*32))&255,(SCREEN+(1*2048)+(6*256)+(4*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(5*32))&255,(SCREEN+(1*2048)+(2*256)+(5*32))&255,(SCREEN+(1*2048)+(4*256)+(5*32))&255,(SCREEN+(1*2048)+(6*256)+(5*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(6*32))&255,(SCREEN+(1*2048)+(2*256)+(6*32))&255,(SCREEN+(1*2048)+(4*256)+(6*32))&255,(SCREEN+(1*2048)+(6*256)+(6*32))&255
+ DEFB (SCREEN+(1*2048)+(0*256)+(7*32))&255,(SCREEN+(1*2048)+(2*256)+(7*32))&255,(SCREEN+(1*2048)+(4*256)+(7*32))&255,(SCREEN+(1*2048)+(6*256)+(7*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(0*32))&255,(SCREEN+(2*2048)+(2*256)+(0*32))&255,(SCREEN+(2*2048)+(4*256)+(0*32))&255,(SCREEN+(2*2048)+(6*256)+(0*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(1*32))&255,(SCREEN+(2*2048)+(2*256)+(1*32))&255,(SCREEN+(2*2048)+(4*256)+(1*32))&255,(SCREEN+(2*2048)+(6*256)+(1*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(2*32))&255,(SCREEN+(2*2048)+(2*256)+(2*32))&255,(SCREEN+(2*2048)+(4*256)+(2*32))&255,(SCREEN+(2*2048)+(6*256)+(2*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(3*32))&255,(SCREEN+(2*2048)+(2*256)+(3*32))&255,(SCREEN+(2*2048)+(4*256)+(3*32))&255,(SCREEN+(2*2048)+(6*256)+(3*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(4*32))&255,(SCREEN+(2*2048)+(2*256)+(4*32))&255,(SCREEN+(2*2048)+(4*256)+(4*32))&255,(SCREEN+(2*2048)+(6*256)+(4*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(5*32))&255,(SCREEN+(2*2048)+(2*256)+(5*32))&255,(SCREEN+(2*2048)+(4*256)+(5*32))&255,(SCREEN+(2*2048)+(6*256)+(5*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(6*32))&255,(SCREEN+(2*2048)+(2*256)+(6*32))&255,(SCREEN+(2*2048)+(4*256)+(6*32))&255,(SCREEN+(2*2048)+(6*256)+(6*32))&255
+ DEFB (SCREEN+(2*2048)+(0*256)+(7*32))&255,(SCREEN+(2*2048)+(2*256)+(7*32))&255,(SCREEN+(2*2048)+(4*256)+(7*32))&255,(SCREEN+(2*2048)+(6*256)+(7*32))&255
+
+ALIGN $100
+ScrBufOddH
+ DEFB (SCREEN+(0*2048)+(1*256)+(0*32))/256,(SCREEN+(0*2048)+(3*256)+(0*32))/256,(SCREEN+(0*2048)+(5*256)+(0*32))/256,(SCREEN+(0*2048)+(7*256)+(0*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(1*32))/256,(SCREEN+(0*2048)+(3*256)+(1*32))/256,(SCREEN+(0*2048)+(5*256)+(1*32))/256,(SCREEN+(0*2048)+(7*256)+(1*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(2*32))/256,(SCREEN+(0*2048)+(3*256)+(2*32))/256,(SCREEN+(0*2048)+(5*256)+(2*32))/256,(SCREEN+(0*2048)+(7*256)+(2*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(3*32))/256,(SCREEN+(0*2048)+(3*256)+(3*32))/256,(SCREEN+(0*2048)+(5*256)+(3*32))/256,(SCREEN+(0*2048)+(7*256)+(3*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(4*32))/256,(SCREEN+(0*2048)+(3*256)+(4*32))/256,(SCREEN+(0*2048)+(5*256)+(4*32))/256,(SCREEN+(0*2048)+(7*256)+(4*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(5*32))/256,(SCREEN+(0*2048)+(3*256)+(5*32))/256,(SCREEN+(0*2048)+(5*256)+(5*32))/256,(SCREEN+(0*2048)+(7*256)+(5*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(6*32))/256,(SCREEN+(0*2048)+(3*256)+(6*32))/256,(SCREEN+(0*2048)+(5*256)+(6*32))/256,(SCREEN+(0*2048)+(7*256)+(6*32))/256
+ DEFB (SCREEN+(0*2048)+(1*256)+(7*32))/256,(SCREEN+(0*2048)+(3*256)+(7*32))/256,(SCREEN+(0*2048)+(5*256)+(7*32))/256,(SCREEN+(0*2048)+(7*256)+(7*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(0*32))/256,(SCREEN+(1*2048)+(3*256)+(0*32))/256,(SCREEN+(1*2048)+(5*256)+(0*32))/256,(SCREEN+(1*2048)+(7*256)+(0*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(1*32))/256,(SCREEN+(1*2048)+(3*256)+(1*32))/256,(SCREEN+(1*2048)+(5*256)+(1*32))/256,(SCREEN+(1*2048)+(7*256)+(1*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(2*32))/256,(SCREEN+(1*2048)+(3*256)+(2*32))/256,(SCREEN+(1*2048)+(5*256)+(2*32))/256,(SCREEN+(1*2048)+(7*256)+(2*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(3*32))/256,(SCREEN+(1*2048)+(3*256)+(3*32))/256,(SCREEN+(1*2048)+(5*256)+(3*32))/256,(SCREEN+(1*2048)+(7*256)+(3*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(4*32))/256,(SCREEN+(1*2048)+(3*256)+(4*32))/256,(SCREEN+(1*2048)+(5*256)+(4*32))/256,(SCREEN+(1*2048)+(7*256)+(4*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(5*32))/256,(SCREEN+(1*2048)+(3*256)+(5*32))/256,(SCREEN+(1*2048)+(5*256)+(5*32))/256,(SCREEN+(1*2048)+(7*256)+(5*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(6*32))/256,(SCREEN+(1*2048)+(3*256)+(6*32))/256,(SCREEN+(1*2048)+(5*256)+(6*32))/256,(SCREEN+(1*2048)+(7*256)+(6*32))/256
+ DEFB (SCREEN+(1*2048)+(1*256)+(7*32))/256,(SCREEN+(1*2048)+(3*256)+(7*32))/256,(SCREEN+(1*2048)+(5*256)+(7*32))/256,(SCREEN+(1*2048)+(7*256)+(7*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(0*32))/256,(SCREEN+(2*2048)+(3*256)+(0*32))/256,(SCREEN+(2*2048)+(5*256)+(0*32))/256,(SCREEN+(2*2048)+(7*256)+(0*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(1*32))/256,(SCREEN+(2*2048)+(3*256)+(1*32))/256,(SCREEN+(2*2048)+(5*256)+(1*32))/256,(SCREEN+(2*2048)+(7*256)+(1*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(2*32))/256,(SCREEN+(2*2048)+(3*256)+(2*32))/256,(SCREEN+(2*2048)+(5*256)+(2*32))/256,(SCREEN+(2*2048)+(7*256)+(2*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(3*32))/256,(SCREEN+(2*2048)+(3*256)+(3*32))/256,(SCREEN+(2*2048)+(5*256)+(3*32))/256,(SCREEN+(2*2048)+(7*256)+(3*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(4*32))/256,(SCREEN+(2*2048)+(3*256)+(4*32))/256,(SCREEN+(2*2048)+(5*256)+(4*32))/256,(SCREEN+(2*2048)+(7*256)+(4*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(5*32))/256,(SCREEN+(2*2048)+(3*256)+(5*32))/256,(SCREEN+(2*2048)+(5*256)+(5*32))/256,(SCREEN+(2*2048)+(7*256)+(5*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(6*32))/256,(SCREEN+(2*2048)+(3*256)+(6*32))/256,(SCREEN+(2*2048)+(5*256)+(6*32))/256,(SCREEN+(2*2048)+(7*256)+(6*32))/256
+ DEFB (SCREEN+(2*2048)+(1*256)+(7*32))/256,(SCREEN+(2*2048)+(3*256)+(7*32))/256,(SCREEN+(2*2048)+(5*256)+(7*32))/256,(SCREEN+(2*2048)+(7*256)+(7*32))/256
+
+ALIGN $100
+ScrBufOddL
+ DEFB (SCREEN+(0*2048)+(1*256)+(0*32))&255,(SCREEN+(0*2048)+(3*256)+(0*32))&255,(SCREEN+(0*2048)+(5*256)+(0*32))&255,(SCREEN+(0*2048)+(7*256)+(0*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(1*32))&255,(SCREEN+(0*2048)+(3*256)+(1*32))&255,(SCREEN+(0*2048)+(5*256)+(1*32))&255,(SCREEN+(0*2048)+(7*256)+(1*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(2*32))&255,(SCREEN+(0*2048)+(3*256)+(2*32))&255,(SCREEN+(0*2048)+(5*256)+(2*32))&255,(SCREEN+(0*2048)+(7*256)+(2*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(3*32))&255,(SCREEN+(0*2048)+(3*256)+(3*32))&255,(SCREEN+(0*2048)+(5*256)+(3*32))&255,(SCREEN+(0*2048)+(7*256)+(3*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(4*32))&255,(SCREEN+(0*2048)+(3*256)+(4*32))&255,(SCREEN+(0*2048)+(5*256)+(4*32))&255,(SCREEN+(0*2048)+(7*256)+(4*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(5*32))&255,(SCREEN+(0*2048)+(3*256)+(5*32))&255,(SCREEN+(0*2048)+(5*256)+(5*32))&255,(SCREEN+(0*2048)+(7*256)+(5*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(6*32))&255,(SCREEN+(0*2048)+(3*256)+(6*32))&255,(SCREEN+(0*2048)+(5*256)+(6*32))&255,(SCREEN+(0*2048)+(7*256)+(6*32))&255
+ DEFB (SCREEN+(0*2048)+(1*256)+(7*32))&255,(SCREEN+(0*2048)+(3*256)+(7*32))&255,(SCREEN+(0*2048)+(5*256)+(7*32))&255,(SCREEN+(0*2048)+(7*256)+(7*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(0*32))&255,(SCREEN+(1*2048)+(3*256)+(0*32))&255,(SCREEN+(1*2048)+(5*256)+(0*32))&255,(SCREEN+(1*2048)+(7*256)+(0*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(1*32))&255,(SCREEN+(1*2048)+(3*256)+(1*32))&255,(SCREEN+(1*2048)+(5*256)+(1*32))&255,(SCREEN+(1*2048)+(7*256)+(1*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(2*32))&255,(SCREEN+(1*2048)+(3*256)+(2*32))&255,(SCREEN+(1*2048)+(5*256)+(2*32))&255,(SCREEN+(1*2048)+(7*256)+(2*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(3*32))&255,(SCREEN+(1*2048)+(3*256)+(3*32))&255,(SCREEN+(1*2048)+(5*256)+(3*32))&255,(SCREEN+(1*2048)+(7*256)+(3*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(4*32))&255,(SCREEN+(1*2048)+(3*256)+(4*32))&255,(SCREEN+(1*2048)+(5*256)+(4*32))&255,(SCREEN+(1*2048)+(7*256)+(4*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(5*32))&255,(SCREEN+(1*2048)+(3*256)+(5*32))&255,(SCREEN+(1*2048)+(5*256)+(5*32))&255,(SCREEN+(1*2048)+(7*256)+(5*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(6*32))&255,(SCREEN+(1*2048)+(3*256)+(6*32))&255,(SCREEN+(1*2048)+(5*256)+(6*32))&255,(SCREEN+(1*2048)+(7*256)+(6*32))&255
+ DEFB (SCREEN+(1*2048)+(1*256)+(7*32))&255,(SCREEN+(1*2048)+(3*256)+(7*32))&255,(SCREEN+(1*2048)+(5*256)+(7*32))&255,(SCREEN+(1*2048)+(7*256)+(7*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(0*32))&255,(SCREEN+(2*2048)+(3*256)+(0*32))&255,(SCREEN+(2*2048)+(5*256)+(0*32))&255,(SCREEN+(2*2048)+(7*256)+(0*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(1*32))&255,(SCREEN+(2*2048)+(3*256)+(1*32))&255,(SCREEN+(2*2048)+(5*256)+(1*32))&255,(SCREEN+(2*2048)+(7*256)+(1*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(2*32))&255,(SCREEN+(2*2048)+(3*256)+(2*32))&255,(SCREEN+(2*2048)+(5*256)+(2*32))&255,(SCREEN+(2*2048)+(7*256)+(2*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(3*32))&255,(SCREEN+(2*2048)+(3*256)+(3*32))&255,(SCREEN+(2*2048)+(5*256)+(3*32))&255,(SCREEN+(2*2048)+(7*256)+(3*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(4*32))&255,(SCREEN+(2*2048)+(3*256)+(4*32))&255,(SCREEN+(2*2048)+(5*256)+(4*32))&255,(SCREEN+(2*2048)+(7*256)+(4*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(5*32))&255,(SCREEN+(2*2048)+(3*256)+(5*32))&255,(SCREEN+(2*2048)+(5*256)+(5*32))&255,(SCREEN+(2*2048)+(7*256)+(5*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(6*32))&255,(SCREEN+(2*2048)+(3*256)+(6*32))&255,(SCREEN+(2*2048)+(5*256)+(6*32))&255,(SCREEN+(2*2048)+(7*256)+(6*32))&255
+ DEFB (SCREEN+(2*2048)+(1*256)+(7*32))&255,(SCREEN+(2*2048)+(3*256)+(7*32))&255,(SCREEN+(2*2048)+(5*256)+(7*32))&255,(SCREEN+(2*2048)+(7*256)+(7*32))&255
+
+ALIGN $100
 ScrBufSprY
  DEFB 0,2,4,6,8,10,12,14
  DEFB 0,2,4,6,8,10,12,14
@@ -2942,6 +3314,140 @@ testspr081601
  defb %10000000,%00000001
  defb %10000000,%00000001
  defb %11111111,%11111111
+
+CHAR080801
+ DEFB %11111111
+ DEFB %10000001
+ DEFB %10111101
+ DEFB %10100101
+ DEFB %10100101
+ DEFB %10111101
+ DEFB %10000001
+ DEFB %11111111
+
+CHAR161601
+ DEFB %11111111,%11111111
+ DEFB %10000000,%00000001
+ DEFB %10111111,%11111101
+ DEFB %10100000,%00000101
+ DEFB %10101111,%11110101
+ DEFB %10101000,%00010101
+ DEFB %10101011,%11010101
+ DEFB %10101010,%01010101
+ DEFB %10101010,%01010101
+ DEFB %10101011,%11010101
+ DEFB %10101000,%00010101
+ DEFB %10101111,%11110101
+ DEFB %10100000,%00000101
+ DEFB %10111111,%11111101
+ DEFB %10000000,%00000001
+ DEFB %11111111,%11111111
+
+combatspr
+combatspr01
+ defb 15,0,0
+ defb 0,48,192
+ defb 64,32,0
+ defb 0,64,32
+ defb 128,16,0
+ defb 0,134,16
+ defb 134,16,0
+ defb 0,128,16
+ defb 64,32,0
+ defb 0,64,32
+ defb 48,192,0
+ defb 0,15,0
+combatspr02
+ defb 7,128,0
+ defb 0,24,96
+ defb 32,16,0
+ defb 0,32,16
+ defb 64,8,0
+ defb 0,67,8
+ defb 67,8,0
+ defb 0,64,8
+ defb 32,16,0
+ defb 0,32,16
+ defb 24,96,0
+ defb 0,7,128
+combatspr03
+ defb 3,192,0
+ defb 0,12,48
+ defb 16,8,0
+ defb 0,16,8
+ defb 32,4,0
+ defb 0,33,132
+ defb 33,132,0
+ defb 0,32,4
+ defb 16,8,0
+ defb 0,16,8
+ defb 12,48,0
+ defb 0,3,192
+combatspr04
+ defb 1,224,0
+ defb 0,6,24
+ defb 8,4,0
+ defb 0,8,4
+ defb 16,2,0
+ defb 0,16,194
+ defb 16,194,0
+ defb 0,16,2
+ defb 8,4,0
+ defb 0,8,4
+ defb 6,24,0
+ defb 0,1,224
+combatspr05
+ defb 0,240,0
+ defb 0,3,12
+ defb 4,2,0
+ defb 0,4,2
+ defb 8,1,0
+ defb 0,8,97
+ defb 8,97,0
+ defb 0,8,1
+ defb 4,2,0
+ defb 0,4,2
+ defb 3,12,0
+ defb 0,0,240
+combatspr06
+ defb 0,120,0
+ defb 0,1,134
+ defb 2,1,0
+ defb 0,2,1
+ defb 4,0,128
+ defb 128,4,48
+ defb 4,48,128
+ defb 128,4,0
+ defb 2,1,0
+ defb 0,2,1
+ defb 1,134,0
+ defb 0,0,120
+combatspr07
+ defb 0,60,0
+ defb 0,0,195
+ defb 1,0,128
+ defb 128,1,0
+ defb 2,0,64
+ defb 64,2,24
+ defb 2,24,64
+ defb 64,2,0
+ defb 1,0,128
+ defb 128,1,0
+ defb 0,195,0
+ defb 0,0,60
+combatspr08
+ defb 0,30,0
+ defb 128,0,97
+ defb 0,128,64
+ defb 64,0,128
+ defb 1,0,32
+ defb 32,1,12
+ defb 1,12,32
+ defb 32,1,0
+ defb 0,128,64
+ defb 64,0,128
+ defb 0,97,128
+ defb 0,0,30
 
 STACK ; workaround as stack was overwriting buffer
  DEFS 4096,0
